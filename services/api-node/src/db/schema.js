@@ -40,4 +40,17 @@ CREATE TABLE IF NOT EXISTS assessment_answers (
   FOREIGN KEY(session_id) REFERENCES assessment_sessions(id),
   FOREIGN KEY(word_id) REFERENCES words(id)
 );
+
+CREATE TABLE IF NOT EXISTS spaced_repetition_items (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  word_id TEXT NOT NULL,
+  box_level INTEGER NOT NULL DEFAULT 1,
+  next_review_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(user_id, word_id),
+  FOREIGN KEY(user_id) REFERENCES users(id),
+  FOREIGN KEY(word_id) REFERENCES words(id)
+);
 `;

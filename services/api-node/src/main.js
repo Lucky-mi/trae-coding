@@ -115,6 +115,18 @@ app.post('/api/assessments/:sessionId/answer', requireAuth, (req, res) => {
     crypto.randomUUID(), sessionId, wordId, isCorrect, choiceIndex, timeSpentMs, Date.now()
   )
 
+  if (!isCorrect) {
+    const existingSrs = db.prepare('SELECT id FROM spaced_repetition_items WHERE user_id = ? AND word_id = ?').get(req.user.id, wordId)
+    const tomorrow = Date.now() + 24 * 60 * 60 * 1000
+    if (existingSrs) {
+      db.prepare('UPDATE spaced_repetition_items SET box_level = 1, next_review_at = ?, updated_at = ? WHERE id = ?').run(tomorrow, Date.now(), existingSrs.id)
+    } else {
+      db.prepare('INSERT INTO spaced_repetition_items (id, user_id, word_id, box_level, next_review_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+        crypto.randomUUID(), req.user.id, wordId, 1, tomorrow, Date.now(), Date.now()
+      )
+    }
+  }
+
   const levels = sortLevels(db.prepare('SELECT DISTINCT level FROM words WHERE stage = ?').all(session.stage).map(r => r.level))
   const ansCount = db.prepare('SELECT count(*) as c FROM assessment_answers WHERE session_id = ?').get(sessionId).c
   const total = session.per_level_count * levels.length
@@ -282,17 +294,61 @@ app.get('/api/words/search', (req, res) => {
 app.get('/api/users/me/mistakes', requireAuth, (req, res) => {
   const mistakes = db.prepare(`
     SELECT w.id, w.word, w.meaning_zh, w.phonetic, w.pos, w.stage, w.level,
-           COUNT(*) as fail_count,
-           MAX(a.created_at) as last_failed_at
-    FROM assessment_answers a
-    JOIN words w ON a.word_id = w.id
-    JOIN assessment_sessions s ON a.session_id = s.id
-    WHERE s.user_id = ? AND a.is_correct = 0
-    GROUP BY w.id
-    ORDER BY last_failed_at DESC
+           srs.box_level,
+           srs.next_review_at
+    FROM spaced_repetition_items srs
+    JOIN words w ON srs.word_id = w.id
+    WHERE srs.user_id = ?
+    ORDER BY srs.next_review_at ASC
     LIMIT 100
   `).all(req.user.id)
   res.json(mistakes)
+})
+
+// SRS Today Review Tasks
+app.get('/api/srs/today', requireAuth, (req, res) => {
+  const now = Date.now()
+  const items = db.prepare(`
+    SELECT s.id as srs_id, s.box_level, w.id, w.word, w.meaning_zh, w.phonetic, w.pos, w.stage, w.level
+    FROM spaced_repetition_items s
+    JOIN words w ON s.word_id = w.id
+    WHERE s.user_id = ? AND s.next_review_at <= ?
+    ORDER BY s.next_review_at ASC
+    LIMIT 30
+  `).all(req.user.id, now)
+
+  const tasks = items.map(wordRow => {
+    const pool = db.prepare('SELECT id, word, meaning_zh, pos FROM words WHERE stage = ?').all(wordRow.stage)
+    const question = buildSingleMcq({ wordRow, pool, rng: Math.random })
+    return { srs_id: wordRow.srs_id, box_level: wordRow.box_level, question }
+  })
+
+  res.json(tasks)
+})
+
+// Submit SRS Review Answer
+app.post('/api/srs/review', requireAuth, (req, res) => {
+  const { srs_id, is_correct } = req.body
+  const item = db.prepare('SELECT * FROM spaced_repetition_items WHERE id = ? AND user_id = ?').get(srs_id, req.user.id)
+  if (!item) return res.status(404).json({ detail: 'srs item not found' })
+
+  let newBox = item.box_level
+  if (is_correct) {
+    newBox = Math.min(item.box_level + 1, 7) // Max box level 7
+  } else {
+    newBox = 1 // Drop to box 1 if failed
+  }
+
+  // Spaced repetition intervals in days: Box 1=1d, 2=2d, 3=4d, 4=7d, 5=15d, 6=30d, 7=60d
+  const intervals = [0, 1, 2, 4, 7, 15, 30, 60]
+  const daysToAdd = intervals[newBox] || 1
+  const nextReviewAt = Date.now() + daysToAdd * 24 * 60 * 60 * 1000
+
+  db.prepare('UPDATE spaced_repetition_items SET box_level = ?, next_review_at = ?, updated_at = ? WHERE id = ?').run(
+    newBox, nextReviewAt, Date.now(), srs_id
+  )
+
+  res.json({ ok: true, box_level: newBox, next_review_at: nextReviewAt })
 })
 
 const port = Number(process.env.PORT || 8000)

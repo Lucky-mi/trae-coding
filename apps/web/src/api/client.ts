@@ -119,6 +119,23 @@ export async function getResult(sessionId: string) {
   return json<ResultOut>(`${API_BASE}/api/assessments/${sessionId}/result`)
 }
 
+export type SrsReviewTask = {
+  srs_id: string
+  box_level: number
+  question: ApiQuestion
+}
+
+export async function getTodayReview() {
+  return json<SrsReviewTask[]>(`${API_BASE}/api/srs/today`)
+}
+
+export async function submitReview(srs_id: string, is_correct: boolean) {
+  return json<{ ok: boolean; box_level: number; next_review_at: number }>(`${API_BASE}/api/srs/review`, {
+    method: 'POST',
+    body: JSON.stringify({ srs_id, is_correct }),
+  })
+}
+
 export type HistorySession = {
   id: string
   stage: string

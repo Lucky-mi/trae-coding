@@ -7,6 +7,7 @@ import AuthPage from './pages/AuthPage'
 import HistoryPage from './pages/HistoryPage'
 import LeaderboardPage from './pages/LeaderboardPage'
 import DictionaryPage from './pages/DictionaryPage'
+import ReviewPage from './pages/ReviewPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
       <Route path="/result" element={<ProtectedRoute><ResultPage /></ProtectedRoute>} />
       <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
       <Route path="/dictionary" element={<ProtectedRoute><DictionaryPage /></ProtectedRoute>} />
+      <Route path="/review" element={<ProtectedRoute><ReviewPage /></ProtectedRoute>} />
       
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

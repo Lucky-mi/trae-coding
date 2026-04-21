@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { searchWords, getMistakes } from '../api/client'
+import { Link } from 'react-router-dom'
+import { searchWords, getMistakes, getTodayReview } from '../api/client'
 import type { WordEntry } from '../api/client'
 import AppShell from '../components/AppShell'
 
@@ -117,6 +118,13 @@ export default function DictionaryPage() {
   const [words, setWords] = useState<WordEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [query, setQuery] = useState('')
+  const [reviewCount, setReviewCount] = useState(0)
+
+  useEffect(() => {
+    getTodayReview().then(res => {
+      setReviewCount(res.length)
+    }).catch(console.error)
+  }, [])
 
   useEffect(() => {
     if (activeTab === 'mistakes') {
@@ -144,6 +152,14 @@ export default function DictionaryPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <h1 className="text-2xl font-bold text-white">词汇中心</h1>
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 p-1 backdrop-blur">
+            {reviewCount > 0 && (
+              <Link
+                to="/review"
+                className="rounded-full bg-brand-500/20 px-4 py-2 text-sm font-medium text-brand-300 transition hover:bg-brand-500/30"
+              >
+                今日复习 ({reviewCount})
+              </Link>
+            )}
             <button
               onClick={() => setActiveTab('mistakes')}
               className={`rounded-full px-6 py-2 text-sm font-medium transition ${
