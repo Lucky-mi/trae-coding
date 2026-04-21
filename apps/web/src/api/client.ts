@@ -43,9 +43,11 @@ export type ResultOut = {
   total: number
   completed: number
   correct: number
-  vocab_score: number
-  ended_by: string
+  vocab_score?: number
+  cefr_level?: string
+  cefr_desc?: string
   by_level: Array<{ level: string; total: number; correct: number }>
+  ended_by: string
 }
 
 export async function json<T>(url: string, init?: RequestInit): Promise<T> {

@@ -19,6 +19,8 @@ type ResultState = {
   correct: number
   byLevel: Array<{ level: string; total: number; correct: number }>
   endedBy: string
+  cefrLevel?: string
+  cefrDesc?: string
 }
 
 export default function ResultPage() {
@@ -41,12 +43,14 @@ export default function ResultPage() {
   const data = useMemo<ResultState>(() => {
     if (remoteData) {
       return {
-        setup: { stage: remoteData.stage as any, perLevelCount: 0, timeLimitSec: null, adaptive: true },
+        setup: { stage: remoteData.stage, perLevelCount: 0, timeLimitSec: null, adaptive: true },
         total: remoteData.total,
         completed: remoteData.completed,
         correct: remoteData.correct,
         byLevel: remoteData.by_level,
-        endedBy: remoteData.ended_by as any,
+        endedBy: remoteData.ended_by,
+        cefrLevel: remoteData.cefr_level,
+        cefrDesc: remoteData.cefr_desc,
       }
     }
     if (state && !state.sessionId) return state
@@ -56,11 +60,16 @@ export default function ResultPage() {
       completed: 24,
       correct: 18,
       byLevel: [
-        { level: '小学 1级', total: 8, correct: 7 },
-        { level: '小学 2级', total: 8, correct: 6 },
-        { level: '小学 3级', total: 8, correct: 5 },
+        { level: '高频核心词', total: 8, correct: 7 },
+        { level: '中频进阶词', total: 8, correct: 6 },
+        { level: '低频生僻词', total: 8, correct: 5 },
+        { level: '名词掌握度', total: 8, correct: 5 },
+        { level: '动词掌握度', total: 8, correct: 5 },
+        { level: '形/副词掌握度', total: 8, correct: 5 },
       ],
       endedBy: 'quota',
+      cefrLevel: 'B1 (中级)',
+      cefrDesc: '表现不错！大部分基础词汇已经掌握，能应对日常交流，但生僻词还需巩固。'
     }
   }, [state, remoteData])
 
@@ -73,21 +82,15 @@ export default function ResultPage() {
     value: x.total > 0 ? Math.round((x.correct / x.total) * 100) : 0,
   }))
 
-  let analysisText = '系统未能收集到足够的答题数据。'
-  if (data.completed > 0) {
-    if (accuracy >= 0.9) analysisText = '你的词汇量非常扎实，在这个阶段已经游刃有余，建议挑战更高难度的词库！'
-    else if (accuracy >= 0.7) analysisText = '表现不错！大部分基础词汇已经掌握，但部分生僻词还需巩固。'
-    else if (accuracy >= 0.4) analysisText = '处于正在积累的阶段，词汇量还有很大提升空间，建议多加复习。'
-    else analysisText = '当前阶段对你来说可能有些困难，建议先从更基础的词库开始背记。'
-  }
+  const analysisText = data.cefrDesc || '系统未能收集到足够的答题数据。'
 
   useEffect(() => {
     if (!state || remoteData) return
     addRecord({
-      stage: data.setup?.stage as any,
+      stage: (data.setup?.stage || '小学') as '小学' | '初中' | '高中',
       correctRate: accuracy,
       total: data.total,
-      endedBy: data.endedBy as any,
+      endedBy: data.endedBy as 'quota' | 'time' | 'converge',
     })
   }, [accuracy, addRecord, data.endedBy, data.setup?.stage, data.total, state, remoteData])
 
@@ -188,10 +191,18 @@ export default function ResultPage() {
               </div>
             </div>
             {remoteData?.vocab_score !== undefined && (
-              <div className="ml-4 rounded-2xl border border-brand-500/20 bg-brand-500/10 px-6 py-4 text-center shadow-glow">
-                <div className="text-xs font-semibold text-brand-300">预估词汇量</div>
-                <div className="mt-1 text-3xl font-bold text-white tracking-tight">
-                  {remoteData.vocab_score}
+              <div className="ml-4 flex gap-3">
+                <div className="rounded-2xl border border-brand-500/20 bg-brand-500/10 px-6 py-4 text-center shadow-glow">
+                  <div className="text-xs font-semibold text-brand-300">预估词汇量</div>
+                  <div className="mt-1 text-3xl font-bold text-white tracking-tight">
+                    {remoteData.vocab_score}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 px-6 py-4 text-center shadow-glow">
+                  <div className="text-xs font-semibold text-purple-300">CEFR 等级</div>
+                  <div className="mt-2 text-xl font-bold text-white tracking-tight">
+                    {data.cefrLevel}
+                  </div>
                 </div>
               </div>
             )}

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import * as echarts from 'echarts'
 import { getHistory } from '../api/client'
 import type { HistorySession } from '../api/client'
 import AppShell from '../components/AppShell'
@@ -8,6 +9,7 @@ export default function HistoryPage() {
   const navigate = useNavigate()
   const [sessions, setSessions] = useState<HistorySession[]>([])
   const [loading, setLoading] = useState(true)
+  const chartRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     getHistory()
@@ -21,6 +23,61 @@ export default function HistoryPage() {
       })
   }, [])
 
+  useEffect(() => {
+    if (loading || sessions.length === 0 || !chartRef.current) return
+
+    // Group max score per day, or just plot chronologically
+    // Since sessions is ordered by created_at DESC from API, reverse it for chronological order
+    const chronological = [...sessions].reverse().filter(s => s.status === 'completed')
+    
+    if (chronological.length === 0) return
+
+    const chart = echarts.init(chartRef.current)
+    chart.setOption({
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'axis' },
+      grid: { left: 40, right: 20, top: 40, bottom: 30 },
+      xAxis: {
+        type: 'category',
+        data: chronological.map(s => {
+          const d = new Date(s.created_at)
+          return `${d.getMonth()+1}-${d.getDate()}`
+        }),
+        axisLabel: { color: 'rgba(255,255,255,0.65)' },
+        axisLine: { lineStyle: { color: 'rgba(255,255,255,0.14)' } }
+      },
+      yAxis: {
+        type: 'value',
+        axisLabel: { color: 'rgba(255,255,255,0.55)' },
+        splitLine: { lineStyle: { color: 'rgba(255,255,255,0.08)' } }
+      },
+      series: [
+        {
+          name: '词汇量',
+          type: 'line',
+          data: chronological.map(s => s.vocab_score),
+          smooth: true,
+          symbolSize: 8,
+          itemStyle: { color: '#a78bfa' },
+          lineStyle: { width: 3, color: '#a78bfa' },
+          areaStyle: {
+            color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+              { offset: 0, color: 'rgba(167,139,250,0.5)' },
+              { offset: 1, color: 'rgba(167,139,250,0.0)' }
+            ])
+          }
+        }
+      ]
+    })
+
+    const onResize = () => chart.resize()
+    window.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      chart.dispose()
+    }
+  }, [sessions, loading])
+
   return (
     <AppShell>
       <div className="mx-auto max-w-4xl">
@@ -33,6 +90,13 @@ export default function HistoryPage() {
             开始新测评
           </Link>
         </div>
+
+        {!loading && sessions.filter(s => s.status === 'completed').length > 1 && (
+          <div className="mt-8 rounded-3xl border border-white/10 bg-panel-800 p-6 shadow-xl backdrop-blur-md">
+            <h2 className="mb-2 text-lg font-semibold text-white/80">词汇量成长轨迹</h2>
+            <div ref={chartRef} className="h-64 w-full" />
+          </div>
+        )}
 
         <div className="mt-8 grid gap-4">
           {loading ? (

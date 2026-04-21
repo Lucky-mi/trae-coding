@@ -96,6 +96,8 @@ export default function QuizPage() {
             correct: r.correct,
             byLevel: r.by_level,
             endedBy: 'time',
+            cefrLevel: r.cefr_level,
+            cefrDesc: r.cefr_desc,
           },
         })
       })()
@@ -146,7 +148,7 @@ export default function QuizPage() {
       })
       setProgress(r.progress)
       setTotal(r.total)
-      if (r.done) {
+      if (!r.question) {
         const result = await getResult(sessionId)
         navigate('/result', {
           state: {
@@ -155,7 +157,9 @@ export default function QuizPage() {
             completed: result.completed,
             correct: result.correct,
             byLevel: result.by_level,
-            endedBy: 'quota',
+            endedBy: r.progress >= r.total ? 'quota' : 'converge',
+            cefrLevel: result.cefr_level,
+            cefrDesc: result.cefr_desc,
           },
         })
         return

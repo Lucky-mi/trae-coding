@@ -117,12 +117,13 @@ app.post('/api/assessments/:sessionId/answer', requireAuth, (req, res) => {
 
   if (!isCorrect) {
     const existingSrs = db.prepare('SELECT id FROM spaced_repetition_items WHERE user_id = ? AND word_id = ?').get(req.user.id, wordId)
-    const tomorrow = Date.now() + 24 * 60 * 60 * 1000
+    // 【测试模式】为了让你马上看到效果，我把“明天”改成了“5秒后”到期
+    const nextTime = Date.now() + 5 * 1000 
     if (existingSrs) {
-      db.prepare('UPDATE spaced_repetition_items SET box_level = 1, next_review_at = ?, updated_at = ? WHERE id = ?').run(tomorrow, Date.now(), existingSrs.id)
+      db.prepare('UPDATE spaced_repetition_items SET box_level = 1, next_review_at = ?, updated_at = ? WHERE id = ?').run(nextTime, Date.now(), existingSrs.id)
     } else {
       db.prepare('INSERT INTO spaced_repetition_items (id, user_id, word_id, box_level, next_review_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
-        crypto.randomUUID(), req.user.id, wordId, 1, tomorrow, Date.now(), Date.now()
+        crypto.randomUUID(), req.user.id, wordId, 1, nextTime, Date.now(), Date.now()
       )
     }
   }
@@ -136,20 +137,44 @@ app.post('/api/assessments/:sessionId/answer', requireAuth, (req, res) => {
     return res.json({ done: true, question: null, progress: ansCount, total })
   }
 
-  // CAT Logic: calculate next level
-  const curLevelIdx = levels.indexOf(wordRow.level)
-  let nextLevelIdx = isCorrect ? curLevelIdx + 1 : curLevelIdx - 1
-  nextLevelIdx = Math.max(0, Math.min(levels.length - 1, nextLevelIdx))
-  const nextLevel = levels[nextLevelIdx]
+  // CAT Logic: calculate next level using IRT
+  // Estimate theta based on current answers
+  const currentAnswers = db.prepare(`
+    SELECT a.is_correct, a.time_spent_ms, w.level, w.pos
+    FROM assessment_answers a
+    JOIN words w ON a.word_id = w.id
+    WHERE a.session_id = ?
+  `).all(sessionId)
 
+  const theta = estimateTheta(currentAnswers)
+  
+  // Early stop condition: SE < 0.35 or ansCount >= total
+  const se = calculateSE(theta, currentAnswers)
+  if (ansCount >= 10 && se < 0.35) {
+    db.prepare("UPDATE assessment_sessions SET status = 'completed', ended_at = ? WHERE id = ?").run(Date.now(), sessionId)
+    return res.json({ done: true, question: null, progress: ansCount, total })
+  }
+
+  // Find a question with b closest to theta
   let nextWordRow = db.prepare(`
-    SELECT * FROM words 
-    WHERE stage = ? AND level = ? 
+    SELECT *, ABS(
+      CASE 
+        WHEN level LIKE 'A1%' THEN -2.0
+        WHEN level LIKE 'A2%' THEN -1.0
+        WHEN level LIKE 'B1%' THEN 0.0
+        WHEN level LIKE 'B2%' THEN 1.0
+        WHEN level LIKE 'C1%' THEN 2.0
+        WHEN level LIKE 'C2%' THEN 3.0
+        ELSE 0.0
+      END - ?
+    ) as diff
+    FROM words 
+    WHERE stage = ? 
     AND id NOT IN (SELECT word_id FROM assessment_answers WHERE session_id = ?) 
-    ORDER BY RANDOM() LIMIT 1
-  `).get(session.stage, nextLevel, sessionId)
+    ORDER BY diff ASC, RANDOM() LIMIT 1
+  `).get(theta, session.stage, sessionId)
 
-  // Fallback if level is exhausted
+  // Fallback
   if (!nextWordRow) {
     nextWordRow = db.prepare(`
       SELECT * FROM words 
@@ -170,13 +195,88 @@ app.post('/api/assessments/:sessionId/answer', requireAuth, (req, res) => {
   res.json({ done: false, question, progress: ansCount, total })
 })
 
-function calcVocabScore(stage, correct, total) {
-  if (!total || total <= 0) return 0
-  const acc = correct / total
-  if (stage === '小学') return Math.round(acc * 800)
-  if (stage === '初中') return Math.round(800 + acc * 1200)
-  if (stage === '高中') return Math.round(2000 + acc * 1500)
-  return Math.round(acc * 1000)
+// Helper to convert CEFR string to numeric b parameter
+function getDifficultyB(levelStr) {
+  if (!levelStr) return 0
+  if (levelStr.includes('A1')) return -2.0
+  if (levelStr.includes('A2')) return -1.0
+  if (levelStr.includes('B1')) return 0.0
+  if (levelStr.includes('B2')) return 1.0
+  if (levelStr.includes('C1')) return 2.0
+  if (levelStr.includes('C2')) return 3.0
+  return 0
+}
+
+// 3PL IRT formula: P(theta) = c + (1 - c) / (1 + exp(-a * (theta - b)))
+function probability(theta, a, b, c) {
+  return c + (1 - c) / (1 + Math.exp(-a * (theta - b)))
+}
+
+// Maximum Likelihood Estimation (MLE) for theta
+// We use Newton-Raphson to find the root of the derivative of the log-likelihood
+function estimateTheta(answers) {
+  let theta = 0.0 // initial guess
+  let a = 1.0     // fixed discrimination for now
+  let c = 0.25    // guessing parameter for 4-option MCQ
+  
+  // Need at least some variation to converge well, but we do our best
+  for (let iter = 0; iter < 10; iter++) {
+    let num = 0.0
+    let den = 0.0
+    for (const ans of answers) {
+      const b = getDifficultyB(ans.level)
+      // Anti-cheating: if answered correctly but too fast (< 800ms), weight it less or ignore
+      // Let's treat extremely fast correct answers as guessed (effectively ignoring their positive signal)
+      // If time_spent_ms is 0 (missing), we don't penalize.
+      let isCorrect = ans.is_correct
+      if (isCorrect && ans.time_spent_ms && ans.time_spent_ms < 800) {
+        // Penalty: pretend it was wrong or ignore. We'll ignore for theta estimation to be fair.
+        continue
+      }
+      
+      const P = probability(theta, a, b, c)
+      const Q = 1 - P
+      
+      // Derivative of log-likelihood
+      num += a * (isCorrect - P) * (P - c) / (P * (1 - c))
+      // Second derivative
+      den -= Math.pow(a, 2) * P * Q * Math.pow((P - c) / (P * (1 - c)), 2)
+    }
+    
+    if (den === 0 || Math.abs(num) < 0.01) break
+    
+    const delta = num / den
+    theta -= delta
+    
+    // Bound theta to reasonable limits [-4, 4]
+    theta = Math.max(-4.0, Math.min(4.0, theta))
+  }
+  return theta
+}
+
+// IRT standard error
+function calculateSE(theta, answers) {
+  let info = 0.0
+  let a = 1.0
+  let c = 0.25
+  for (const ans of answers) {
+    const b = getDifficultyB(ans.level)
+    if (ans.is_correct && ans.time_spent_ms && ans.time_spent_ms < 800) continue
+    const P = probability(theta, a, b, c)
+    const Q = 1 - P
+    info += Math.pow(a, 2) * Q / P * Math.pow((P - c) / (1 - c), 2)
+  }
+  return info > 0 ? 1.0 / Math.sqrt(info) : 9.99
+}
+
+function calcVocabScoreIRT(theta) {
+  // Map theta [-3, 3] to Vocab [0, 10000]
+  // theta = -2 (A1) ~ 1000
+  // theta = 0 (B1) ~ 3000
+  // theta = 3 (C2) ~ 8000+
+  // Linear interpolation: vocab = 3500 + theta * 1500
+  let vocab = 3500 + theta * 1500
+  return Math.max(0, Math.min(12000, Math.round(vocab)))
 }
 
 // Result
@@ -185,26 +285,61 @@ app.get('/api/assessments/:sessionId/result', requireAuth, (req, res) => {
   const session = db.prepare('SELECT * FROM assessment_sessions WHERE id = ? AND user_id = ?').get(sessionId, req.user.id)
   if (!session) return res.status(404).json({ detail: 'session not found' })
 
-  const stats = db.prepare(`
-    SELECT w.level, COUNT(*) as total, SUM(a.is_correct) as correct
+  const answers = db.prepare(`
+    SELECT a.is_correct, a.time_spent_ms, w.level, w.pos
     FROM assessment_answers a
     JOIN words w ON a.word_id = w.id
     WHERE a.session_id = ?
-    GROUP BY w.level
   `).all(sessionId)
 
-  const ansCount = db.prepare('SELECT count(*) as c FROM assessment_answers WHERE session_id = ?').get(sessionId).c
-  const correctCount = db.prepare('SELECT sum(is_correct) as c FROM assessment_answers WHERE session_id = ?').get(sessionId).c || 0
+  const ansCount = answers.length
+  const correctCount = answers.reduce((sum, a) => sum + a.is_correct, 0)
+  
   const levels = db.prepare('SELECT DISTINCT level FROM words WHERE stage = ?').all(session.stage).map(r => r.level)
   const total = session.per_level_count * levels.length
 
-  const byLevel = stats.map(s => ({
-    level: s.level,
-    total: s.total,
-    correct: s.correct
-  }))
+  const radar = {
+    core: { total: 0, correct: 0 },
+    advanced: { total: 0, correct: 0 },
+    rare: { total: 0, correct: 0 },
+    noun: { total: 0, correct: 0 },
+    verb: { total: 0, correct: 0 },
+    adj_adv: { total: 0, correct: 0 },
+  }
 
-  const vocabScore = calcVocabScore(session.stage, correctCount, ansCount)
+  for (const a of answers) {
+    if (!a.level) continue
+    if (a.level.includes('A1') || a.level.includes('A2')) { radar.core.total++; radar.core.correct += a.is_correct }
+    if (a.level.includes('B1') || a.level.includes('B2')) { radar.advanced.total++; radar.advanced.correct += a.is_correct }
+    if (a.level.includes('C1') || a.level.includes('C2')) { radar.rare.total++; radar.rare.correct += a.is_correct }
+    
+    if (a.pos) {
+      if (a.pos.includes('n')) { radar.noun.total++; radar.noun.correct += a.is_correct }
+      if (a.pos.includes('v')) { radar.verb.total++; radar.verb.correct += a.is_correct }
+      if (a.pos.includes('adj') || a.pos.includes('adv')) { radar.adj_adv.total++; radar.adj_adv.correct += a.is_correct }
+    }
+  }
+
+  const byLevel = [
+    { level: '高频核心词', total: radar.core.total, correct: radar.core.correct },
+    { level: '中频进阶词', total: radar.advanced.total, correct: radar.advanced.correct },
+    { level: '低频生僻词', total: radar.rare.total, correct: radar.rare.correct },
+    { level: '名词掌握度', total: radar.noun.total, correct: radar.noun.correct },
+    { level: '动词掌握度', total: radar.verb.total, correct: radar.verb.correct },
+    { level: '形/副词掌握度', total: radar.adj_adv.total, correct: radar.adj_adv.correct }
+  ]
+
+  const theta = estimateTheta(answers)
+  const vocabScore = calcVocabScoreIRT(theta)
+
+  // Map vocabScore to CEFR
+  let cefrLevel = 'A1 (入门)'
+  let cefrDesc = '处于正在积累的阶段，词汇量还有很大提升空间，建议多加复习。'
+  if (vocabScore >= 8000) { cefrLevel = 'C2 (精通)'; cefrDesc = '词汇量极其丰富，能够理解几乎所有形式的英语，包括复杂的学术或专业文章。' }
+  else if (vocabScore >= 6000) { cefrLevel = 'C1 (高级)'; cefrDesc = '能够理解广泛的高难度长篇文章，能流利、自然地表达自己。' }
+  else if (vocabScore >= 4000) { cefrLevel = 'B2 (中高)'; cefrDesc = '词汇量扎实，能听懂无字幕美剧的大部分日常对话，但在阅读长篇生僻文章时可能遇到阻碍。' }
+  else if (vocabScore >= 2000) { cefrLevel = 'B1 (中级)'; cefrDesc = '表现不错！大部分基础词汇已经掌握，能应对日常交流，但生僻词还需巩固。' }
+  else if (vocabScore >= 1000) { cefrLevel = 'A2 (初级)'; cefrDesc = '能够理解并使用一些基本的、日常的词汇和句子。' }
 
   res.json({
     session_id: sessionId,
@@ -213,8 +348,10 @@ app.get('/api/assessments/:sessionId/result', requireAuth, (req, res) => {
     completed: ansCount,
     correct: correctCount,
     vocab_score: vocabScore,
-    ended_by: session.status === 'completed' ? 'quota' : 'ongoing',
+    cefr_level: cefrLevel,
+    cefr_desc: cefrDesc,
     by_level: byLevel,
+    ended_by: session.ended_at ? 'completed' : 'ongoing'
   })
 })
 
@@ -230,11 +367,20 @@ app.get('/api/users/me/history', requireAuth, (req, res) => {
     LIMIT 50
   `).all(req.user.id)
   
-  res.json(sessions.map(s => ({
-    ...s,
-    correct: s.correct || 0,
-    vocab_score: calcVocabScore(s.stage, s.correct || 0, s.total || 0)
-  })))
+  res.json(sessions.map(s => {
+    const answers = db.prepare(`
+      SELECT a.is_correct, a.time_spent_ms, w.level, w.pos
+      FROM assessment_answers a
+      JOIN words w ON a.word_id = w.id
+      WHERE a.session_id = ?
+    `).all(s.id)
+    const theta = estimateTheta(answers)
+    return {
+      ...s,
+      correct: s.correct || 0,
+      vocab_score: calcVocabScoreIRT(theta)
+    }
+  }))
 })
 
 // Leaderboard
@@ -259,7 +405,15 @@ app.get('/api/leaderboard', (req, res) => {
 
   const userBest = new Map()
   for (const s of sessions) {
-    const score = calcVocabScore(s.stage, s.correct || 0, s.total || 0)
+    const answers = db.prepare(`
+      SELECT a.is_correct, a.time_spent_ms, w.level, w.pos
+      FROM assessment_answers a
+      JOIN words w ON a.word_id = w.id
+      WHERE a.session_id = ?
+    `).all(s.id)
+    const theta = estimateTheta(answers)
+    const score = calcVocabScoreIRT(theta)
+    
     if (!userBest.has(s.username) || userBest.get(s.username).vocab_score < score) {
       userBest.set(s.username, { 
         username: s.username, 
@@ -339,8 +493,8 @@ app.post('/api/srs/review', requireAuth, (req, res) => {
     newBox = 1 // Drop to box 1 if failed
   }
 
-  // Spaced repetition intervals in days: Box 1=1d, 2=2d, 3=4d, 4=7d, 5=15d, 6=30d, 7=60d
-  const intervals = [0, 1, 2, 4, 7, 15, 30, 60]
+  // SRS intervals: Box 1=1d, 2=3d, 3=7d, 4=15d, 5=30d, 6=90d, 7=180d
+  const intervals = [0, 1, 3, 7, 15, 30, 90, 180]
   const daysToAdd = intervals[newBox] || 1
   const nextReviewAt = Date.now() + daysToAdd * 24 * 60 * 60 * 1000
 
