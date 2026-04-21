@@ -2,7 +2,9 @@ const API_BASE = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:80
 
 export type ApiQuestion = {
   id: string
-  stem: string
+  word: string
+  phonetic: string | null
+  pos: string | null
   options: string[]
   answerIndex: number
   level: string | null
@@ -41,6 +43,7 @@ export type ResultOut = {
   total: number
   completed: number
   correct: number
+  vocab_score: number
   ended_by: string
   by_level: Array<{ level: string; total: number; correct: number }>
 }
@@ -122,11 +125,46 @@ export type HistorySession = {
   created_at: number
   total: number
   correct: number
+  vocab_score: number
   status: string
 }
 
 export async function getHistory() {
   return json<HistorySession[]>(`${API_BASE}/api/users/me/history`)
+}
+
+export type LeaderboardEntry = {
+  username: string
+  vocab_score: number
+  stage: string
+  created_at: number
+}
+
+export async function getLeaderboard(stage?: string) {
+  const url = stage ? `${API_BASE}/api/leaderboard?stage=${encodeURIComponent(stage)}` : `${API_BASE}/api/leaderboard`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error('Failed to load leaderboard')
+  return (await res.json()) as LeaderboardEntry[]
+}
+
+export type WordEntry = {
+  id: string
+  word: string
+  meaning_zh: string
+  phonetic: string
+  pos: string
+  stage: string
+  level?: string
+  fail_count?: number
+  last_failed_at?: number
+}
+
+export async function searchWords(q: string) {
+  return json<WordEntry[]>(`${API_BASE}/api/words/search?q=${encodeURIComponent(q)}`)
+}
+
+export async function getMistakes() {
+  return json<WordEntry[]>(`${API_BASE}/api/users/me/mistakes`)
 }
 
 export type UserMe = {

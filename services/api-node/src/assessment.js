@@ -1,28 +1,17 @@
 export function sortLevels(levels) {
-  function key(lv) {
+  function getCefrRank(lv) {
     const s = String(lv || '').trim()
-    let stageRank = 9
-    if (s.startsWith('小学')) stageRank = 1
-    else if (s.startsWith('初中')) stageRank = 2
-    else if (s.startsWith('高中')) stageRank = 3
-    let num = 999
-    for (const token of s.split(/\s+/)) {
-      if (token.endsWith('级')) {
-        const t = token.slice(0, -1)
-        if (/^\d+$/.test(t)) num = Number(t)
-      }
-    }
-    return [stageRank, num, s]
+    if (s.startsWith('A1')) return 1
+    if (s.startsWith('A2')) return 2
+    if (s.startsWith('B1')) return 3
+    if (s.startsWith('B2')) return 4
+    if (s.startsWith('C1')) return 5
+    if (s.startsWith('C2')) return 6
+    return 99
   }
 
   return [...levels].sort((a, b) => {
-    const ka = key(a)
-    const kb = key(b)
-    for (let i = 0; i < ka.length; i += 1) {
-      if (ka[i] < kb[i]) return -1
-      if (ka[i] > kb[i]) return 1
-    }
-    return 0
+    return getCefrRank(a) - getCefrRank(b)
   })
 }
 
@@ -44,9 +33,6 @@ function levenshtein(a, b) {
 }
 
 export function buildSingleMcq({ wordRow, pool, rng }) {
-  const posStr = wordRow.pos ? ` //${wordRow.pos}//` : ''
-  const phonStr = wordRow.phonetic ? ` //${wordRow.phonetic}//` : ''
-  const stem = `“${wordRow.word}${phonStr}${posStr}” 的中文意思是？`
   const correct = wordRow.meaning_zh
 
   // Pool contains { id, word, meaning_zh, pos }
@@ -81,7 +67,9 @@ export function buildSingleMcq({ wordRow, pool, rng }) {
 
   return {
     id: wordRow.id,
-    stem,
+    word: wordRow.word,
+    phonetic: wordRow.phonetic || null,
+    pos: wordRow.pos || null,
     options,
     answerIndex: options.indexOf(correct),
     level: wordRow.level || null,

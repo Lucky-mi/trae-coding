@@ -43,7 +43,24 @@ app.get('/health', (req, res) => {
   res.json({ ok: true, words: c })
 })
 
-// Start Assessment
+app.post('/api/admin/reload_lexicon', requireAuth, (req, res) => {
+  const lexicon = loadLexicon(projectRoot)
+  
+  db.transaction(() => {
+    // 临时关闭外键约束以便全量刷新词库
+    db.pragma('foreign_keys = OFF')
+    db.prepare('DELETE FROM assessment_answers').run()
+    db.prepare('DELETE FROM assessment_sessions').run()
+    db.prepare('DELETE FROM words').run()
+    
+    const insert = db.prepare('INSERT INTO words (id, word, meaning_zh, stage, level, pos, phonetic) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    for (const w of lexicon) {
+      insert.run(crypto.randomUUID(), w.word, w.meaning_zh, w.stage, w.level, w.pos, w.phonetic)
+    }
+    db.pragma('foreign_keys = ON')
+  })()
+  res.json({ ok: true, words: lexicon.length })
+})
 app.post('/api/assessments/start', requireAuth, (req, res) => {
   const stage = String(req.body?.stage || '').trim()
   const perLevelCount = Number(req.body?.per_level_count ?? 4)
@@ -141,6 +158,15 @@ app.post('/api/assessments/:sessionId/answer', requireAuth, (req, res) => {
   res.json({ done: false, question, progress: ansCount, total })
 })
 
+function calcVocabScore(stage, correct, total) {
+  if (!total || total <= 0) return 0
+  const acc = correct / total
+  if (stage === '小学') return Math.round(acc * 800)
+  if (stage === '初中') return Math.round(800 + acc * 1200)
+  if (stage === '高中') return Math.round(2000 + acc * 1500)
+  return Math.round(acc * 1000)
+}
+
 // Result
 app.get('/api/assessments/:sessionId/result', requireAuth, (req, res) => {
   const sessionId = req.params.sessionId
@@ -166,12 +192,15 @@ app.get('/api/assessments/:sessionId/result', requireAuth, (req, res) => {
     correct: s.correct
   }))
 
+  const vocabScore = calcVocabScore(session.stage, correctCount, ansCount)
+
   res.json({
     session_id: sessionId,
     stage: session.stage,
     total,
     completed: ansCount,
     correct: correctCount,
+    vocab_score: vocabScore,
     ended_by: session.status === 'completed' ? 'quota' : 'ongoing',
     by_level: byLevel,
   })
@@ -191,8 +220,79 @@ app.get('/api/users/me/history', requireAuth, (req, res) => {
   
   res.json(sessions.map(s => ({
     ...s,
-    correct: s.correct || 0
+    correct: s.correct || 0,
+    vocab_score: calcVocabScore(s.stage, s.correct || 0, s.total || 0)
   })))
+})
+
+// Leaderboard
+app.get('/api/leaderboard', (req, res) => {
+  const stageFilter = req.query.stage
+  
+  let query = `
+    SELECT s.id, s.stage, u.username, s.created_at,
+      (SELECT COUNT(*) FROM assessment_answers a WHERE a.session_id = s.id) as total,
+      (SELECT SUM(is_correct) FROM assessment_answers a WHERE a.session_id = s.id) as correct
+    FROM assessment_sessions s
+    JOIN users u ON s.user_id = u.id
+    WHERE s.status = 'completed'
+  `
+  const params = []
+  if (stageFilter) {
+    query += ` AND s.stage = ?`
+    params.push(stageFilter)
+  }
+
+  const sessions = db.prepare(query).all(...params)
+
+  const userBest = new Map()
+  for (const s of sessions) {
+    const score = calcVocabScore(s.stage, s.correct || 0, s.total || 0)
+    if (!userBest.has(s.username) || userBest.get(s.username).vocab_score < score) {
+      userBest.set(s.username, { 
+        username: s.username, 
+        vocab_score: score, 
+        stage: s.stage, 
+        created_at: s.created_at 
+      })
+    }
+  }
+
+  const leaderboard = Array.from(userBest.values())
+    .sort((a, b) => b.vocab_score - a.vocab_score)
+    .slice(0, 50)
+
+  res.json(leaderboard)
+})
+
+// Search Dictionary
+app.get('/api/words/search', (req, res) => {
+  const q = String(req.query.q || '').trim()
+  if (!q) return res.json([])
+  const words = db.prepare(`
+    SELECT id, word, meaning_zh, phonetic, pos, stage, level
+    FROM words
+    WHERE word LIKE ? OR meaning_zh LIKE ?
+    LIMIT 50
+  `).all(`%${q}%`, `%${q}%`)
+  res.json(words)
+})
+
+// Mistakes (Wrong Answers)
+app.get('/api/users/me/mistakes', requireAuth, (req, res) => {
+  const mistakes = db.prepare(`
+    SELECT w.id, w.word, w.meaning_zh, w.phonetic, w.pos, w.stage, w.level,
+           COUNT(*) as fail_count,
+           MAX(a.created_at) as last_failed_at
+    FROM assessment_answers a
+    JOIN words w ON a.word_id = w.id
+    JOIN assessment_sessions s ON a.session_id = s.id
+    WHERE s.user_id = ? AND a.is_correct = 0
+    GROUP BY w.id
+    ORDER BY last_failed_at DESC
+    LIMIT 100
+  `).all(req.user.id)
+  res.json(mistakes)
 })
 
 const port = Number(process.env.PORT || 8000)

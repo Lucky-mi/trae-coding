@@ -177,14 +177,24 @@ export default function ResultPage() {
     <AppShell>
       <div className="mx-auto max-w-4xl">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="text-xs text-white/55">测评报告</div>
-            <h2 className="mt-2 text-2xl font-semibold text-white md:text-3xl">
-              {data.setup?.stage} · {Math.round(accuracy * 100)}% 正确率
-            </h2>
-            <div className="mt-2 text-sm text-white/60">
-              完成 {data.completed}/{data.total} · 结束条件：{endedByText(data.endedBy)}
+          <div className="flex items-center gap-6">
+            <div>
+              <div className="text-xs text-white/55">测评报告</div>
+              <h2 className="mt-2 text-2xl font-semibold text-white md:text-3xl">
+                {data.setup?.stage} · {Math.round(accuracy * 100)}% 正确率
+              </h2>
+              <div className="mt-2 text-sm text-white/60">
+                完成 {data.completed}/{data.total} · 结束条件：{endedByText(data.endedBy)}
+              </div>
             </div>
+            {remoteData?.vocab_score !== undefined && (
+              <div className="ml-4 rounded-2xl border border-brand-500/20 bg-brand-500/10 px-6 py-4 text-center shadow-glow">
+                <div className="text-xs font-semibold text-brand-300">预估词汇量</div>
+                <div className="mt-1 text-3xl font-bold text-white tracking-tight">
+                  {remoteData.vocab_score}
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-3">
             <Link

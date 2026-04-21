@@ -11,20 +11,25 @@ export function defaultXlsxPaths(projectRoot) {
 }
 
 export function inferStageFromFilename(name) {
-  if (name.includes('小学')) return '小学'
-  if (name.includes('初中')) return '初中'
   if (name.includes('高中')) return '高中'
+  if (name.includes('初中')) return '初中'
+  if (name.includes('小学')) return '小学'
   return '未知'
 }
 
 export function loadLexicon(projectRoot) {
   const out = []
   for (const p of defaultXlsxPaths(projectRoot)) {
-    if (!fs.existsSync(p)) continue
+    if (!fs.existsSync(p)) {
+      console.log('Missing file:', p)
+      continue
+    }
     const stage = inferStageFromFilename(path.basename(p))
-    out.push(...loadXlsx(p, stage))
+    const items = loadXlsx(p, stage)
+    console.log(`Loaded ${items.length} items for stage ${stage} from ${path.basename(p)}`)
+    out.push(...items)
   }
-  return assignLevels(dedupItems(out))
+  return assignLevels(dedupItems(out), projectRoot)
 }
 
 function loadXlsx(filePath, stage) {
@@ -37,7 +42,10 @@ function loadXlsx(filePath, stage) {
     if (!rows.length) continue
     const columns = normalizeColumns(Object.keys(rows[0] || {}))
     const colWord = pickCol(columns, ['word', '单词', '词汇', '英文'])
-    if (!colWord) continue
+    if (!colWord) {
+      console.log('Skipping sheet', sheetName, 'because no word column found in', columns)
+      continue
+    }
     const colMeaning = pickCol(columns, [
       'meaning_zh',
       '译文',
@@ -59,11 +67,9 @@ function loadXlsx(filePath, stage) {
       const meaning = colMeaning ? asStr(row[colMeaning]) : ''
       const level = colLevel ? normalizeLevel(asStr(row[colLevel])) : ''
       const phonetic = colPhonetic ? normalizePhonetic(asStr(row[colPhonetic])) : ''
-      const pos = colPos
-        ? normalizePos(asStr(row[colPos]))
-        : meaning
-          ? extractPosFromMeaning(meaning)
-          : ''
+      const pos =
+        (colPos ? normalizePos(asStr(row[colPos])) : '') ||
+        (meaning ? extractPosFromMeaning(meaning) : '')
       out.push({
         word,
         meaning_zh: meaning || null,
@@ -94,11 +100,12 @@ function normalizeRowKeys(row) {
 
 function pickCol(cols, candidates) {
   for (const c of candidates) {
-    if (cols.includes(c)) return c
+    const exact = cols.find((col) => col.toLowerCase() === c.toLowerCase())
+    if (exact) return exact
   }
   for (const col of cols) {
     for (const c of candidates) {
-      if (col.includes(c)) return col
+      if (col.toLowerCase().includes(c.toLowerCase())) return col
     }
   }
   return null
@@ -183,29 +190,40 @@ function dedupItems(items) {
   return out
 }
 
-function assignLevels(items) {
-  const stageLevels = new Map([
-    ['小学', 6],
-    ['初中', 6],
-    ['高中', 3],
-  ])
-
-  const groups = new Map()
-  for (const it of items) {
-    if (!groups.has(it.stage)) groups.set(it.stage, [])
-    groups.get(it.stage).push(it)
-  }
-
-  const out = []
-  for (const [stage, arr] of groups.entries()) {
-    const levelCount = stageLevels.get(stage) || 3
-    const sorted = [...arr].sort((a, b) => a.word.localeCompare(b.word))
-    const chunk = Math.ceil(sorted.length / levelCount) || 1
-    for (let i = 0; i < sorted.length; i += 1) {
-      const it = sorted[i]
-      const lv = it.level || `${stage} ${Math.min(levelCount, Math.floor(i / chunk) + 1)}级`
-      out.push({ ...it, level: lv })
+function assignLevels(items, projectRoot) {
+  const txtPath = path.join(projectRoot, 'services/api-node/data/freq-10k.txt')
+  const fMap = new Map()
+  try {
+    const content = fs.readFileSync(txtPath, 'utf8')
+    const lines = content.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const w = lines[i].trim().toLowerCase()
+      if (w && !fMap.has(w)) {
+        fMap.set(w, i + 1)
+      }
     }
+  } catch (e) {
+    console.error('Failed to load freq map', e)
   }
-  return out
+
+  function getRank(w) {
+    const wLow = w.toLowerCase()
+    if (fMap.has(wLow)) return fMap.get(wLow)
+    return 10000 + wLow.length * 100
+  }
+
+  function getCEFR(rank) {
+    if (rank <= 1500) return 'A1 (入门)'
+    if (rank <= 3000) return 'A2 (初级)'
+    if (rank <= 5000) return 'B1 (中级)'
+    if (rank <= 8000) return 'B2 (中高级)'
+    if (rank <= 12000) return 'C1 (高级)'
+    return 'C2 (精通)'
+  }
+
+  for (const it of items) {
+    const r = getRank(it.word)
+    it.level = getCEFR(r)
+  }
+  return items
 }

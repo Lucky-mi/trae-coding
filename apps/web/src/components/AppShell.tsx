@@ -34,6 +34,18 @@ export default function AppShell(props: { children: ReactNode }) {
           </span>
         </Link>
         <div className="hidden items-center gap-2 md:flex">
+          <Link
+            to="/dictionary"
+            className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-sm text-brand-300 backdrop-blur transition hover:text-brand-200 hover:bg-white/5 mr-1 font-medium"
+          >
+            词汇中心
+          </Link>
+          <Link
+            to="/leaderboard"
+            className="rounded-full border border-white/10 bg-transparent px-4 py-2 text-sm text-brand-300 backdrop-blur transition hover:text-brand-200 hover:bg-white/5 mr-2 font-medium"
+          >
+            天梯榜
+          </Link>
           {token ? (
             <>
               {user && (
