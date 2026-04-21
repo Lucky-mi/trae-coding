@@ -129,6 +129,7 @@ export default function QuizPage() {
       const r = await answer(sessionId, {
         question_id: question.id,
         choice_index: optionIndex,
+        is_correct: optionIndex === question.answerIndex
       })
       setProgress(r.progress)
       setTotal(r.total)

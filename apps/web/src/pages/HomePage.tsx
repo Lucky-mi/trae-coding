@@ -23,12 +23,6 @@ export default function HomePage() {
             >
               开始测评
             </Link>
-            <Link
-              to="/result"
-              className="rounded-full border border-white/10 bg-white/5 px-6 py-3 text-sm font-semibold text-white/80 backdrop-blur transition hover:bg-white/10"
-            >
-              查看示例报告
-            </Link>
           </div>
           <div className="grid grid-cols-3 gap-3 pt-4 text-xs text-white/60">
             <div className="rounded-2xl border border-white/10 bg-panel-900 px-4 py-3 backdrop-blur">

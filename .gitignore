@@ -31,3 +31,13 @@ __pycache__/
 .vscode/
 *.sw?
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+data.db*
+
+# Uploads / Assets
+uploads/
+temp/
+

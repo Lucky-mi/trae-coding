@@ -4,6 +4,7 @@ export type ApiQuestion = {
   id: string
   stem: string
   options: string[]
+  answerIndex: number
   level: string | null
   kind: string
 }
@@ -24,6 +25,7 @@ export type StartAssessmentOut = {
 export type AnswerIn = {
   question_id: string
   choice_index: number
+  is_correct: boolean
 }
 
 export type AnswerOut = {
@@ -43,19 +45,57 @@ export type ResultOut = {
   by_level: Array<{ level: string; total: number; correct: number }>
 }
 
-async function json<T>(url: string, init?: RequestInit): Promise<T> {
+export async function json<T>(url: string, init?: RequestInit): Promise<T> {
+  const token = localStorage.getItem('wordgauge-token')
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    ...(init?.headers as Record<string, string> || {}),
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`
+  }
+
   const res = await fetch(url, {
     ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...(init?.headers || {}),
-    },
+    headers,
   })
   if (!res.ok) {
     const text = await res.text()
-    throw new Error(text || `HTTP ${res.status}`)
+    if (res.status === 401) {
+      localStorage.removeItem('wordgauge-token')
+      window.location.href = '/auth'
+    }
+    try {
+      const err = JSON.parse(text)
+      throw new Error(err.detail || err.message || `HTTP ${res.status}`)
+    } catch {
+      throw new Error(text || `HTTP ${res.status}`)
+    }
   }
   return (await res.json()) as T
+}
+
+export async function register(username: string, password: string) {
+  const r = await json<{ token: string }>(`${API_BASE}/api/auth/register`, {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+  localStorage.setItem('wordgauge-token', r.token)
+  return r
+}
+
+export async function login(username: string, password: string) {
+  const r = await json<{ token: string }>(`${API_BASE}/api/auth/login`, {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  })
+  localStorage.setItem('wordgauge-token', r.token)
+  return r
+}
+
+export function logout() {
+  localStorage.removeItem('wordgauge-token')
+  window.location.href = '/auth'
 }
 
 export async function startAssessment(body: StartAssessmentIn) {
@@ -74,5 +114,27 @@ export async function answer(sessionId: string, body: AnswerIn) {
 
 export async function getResult(sessionId: string) {
   return json<ResultOut>(`${API_BASE}/api/assessments/${sessionId}/result`)
+}
+
+export type HistorySession = {
+  id: string
+  stage: string
+  created_at: number
+  total: number
+  correct: number
+  status: string
+}
+
+export async function getHistory() {
+  return json<HistorySession[]>(`${API_BASE}/api/users/me/history`)
+}
+
+export type UserMe = {
+  id: string
+  username: string
+}
+
+export async function getMe() {
+  return json<UserMe>(`${API_BASE}/api/auth/me`)
 }
 
