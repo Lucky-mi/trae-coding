@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppShell from '../components/AppShell'
+import { useSession } from '../store/useSession'
+import type { SessionState } from '../store/useSession'
 
 type Stage = '小学' | '初中' | '高中'
 
 export default function SetupPage() {
   const navigate = useNavigate()
+  const guestId = useSession((s: SessionState) => s.guestId)
   const [stage, setStage] = useState<Stage>('小学')
   const [perLevelCount, setPerLevelCount] = useState(4)
   const [timeLimitSec, setTimeLimitSec] = useState(15 * 60)
@@ -163,6 +166,7 @@ export default function SetupPage() {
                       perLevelCount,
                       timeLimitSec: enableTimer ? timeLimitSec : null,
                       adaptive,
+                      guestId,
                     },
                   })
                 }

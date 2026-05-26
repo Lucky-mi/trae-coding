@@ -2,6 +2,21 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes pop {
+  0% { transform: scale(0); }
+  70% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
+@layer utilities {
+  .shadow-glow {
+    box-shadow: 0 0 40px -10px rgba(167, 139, 250, 0.15);
+  }
+  .animate-\\[pop_0\\.3s_ease-out_forwards\\] {
+    animation: pop 0.3s ease-out forwards;
+  }
+}
+
 html,
 body {
   height: 100%;

@@ -67,12 +67,13 @@ function loadXlsx(filePath, stage) {
       const meaning = colMeaning ? asStr(row[colMeaning]) : ''
       const level = colLevel ? normalizeLevel(asStr(row[colLevel])) : ''
       const phonetic = colPhonetic ? normalizePhonetic(asStr(row[colPhonetic])) : ''
+      const correctedMeaning = correctKnownMeaning(word, meaning)
       const pos =
         (colPos ? normalizePos(asStr(row[colPos])) : '') ||
-        (meaning ? extractPosFromMeaning(meaning) : '')
+        (correctedMeaning ? extractPosFromMeaning(correctedMeaning) : '')
       out.push({
         word,
-        meaning_zh: meaning || null,
+        meaning_zh: correctedMeaning || null,
         stage,
         level: level || null,
         pos: pos || null,
@@ -81,6 +82,22 @@ function loadXlsx(filePath, stage) {
     }
   }
   return out
+}
+
+function correctKnownMeaning(word, meaning) {
+  const wordLower = word.trim().toLowerCase()
+  const meaningText = meaning.trim()
+  if (!meaningText) return meaningText
+
+  // Some source xlsx rows are known to be mislabeled.
+  if (wordLower === 'grandfather (grandpa)' && /奶奶|外婆/.test(meaningText)) {
+    return 'n.爷爷;外公'
+  }
+  if (wordLower === 'grandmother (grandma)' && /爷爷|外公/.test(meaningText)) {
+    return 'n.奶奶;外婆'
+  }
+
+  return meaningText
 }
 
 function normalizeColumns(cols) {

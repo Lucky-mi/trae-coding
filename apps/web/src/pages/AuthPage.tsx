@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login, register } from '../api/client'
 import AppShell from '../components/AppShell'
+import { useAuth } from '../store/useAuth'
 
 export default function AuthPage() {
   const navigate = useNavigate()
+  const { fetchUser, bindGuestHistory } = useAuth()
   const [isLogin, setIsLogin] = useState(true)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -27,6 +29,8 @@ export default function AuthPage() {
       } else {
         await register(username, password)
       }
+      await fetchUser()
+      await bindGuestHistory()
       navigate('/setup', { replace: true })
     } catch (err: any) {
       setError(err.message || '操作失败')

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { searchWords, getMistakes, getTodayReview } from '../api/client'
-import type { WordEntry } from '../api/client'
+import { getRelatedWords, searchWords, getMistakes, getTodayReview } from '../api/client'
+import type { RelatedWordEntry, WordEntry } from '../api/client'
 import AppShell from '../components/AppShell'
 
 type DictEntryData = {
@@ -15,6 +15,8 @@ function WordRow({ w }: { w: WordEntry }) {
   const [expanded, setExpanded] = useState(false)
   const [dictData, setDictData] = useState<DictEntryData | null>(null)
   const [loadingDict, setLoadingDict] = useState(false)
+  const [relatedWords, setRelatedWords] = useState<RelatedWordEntry[]>([])
+  const [loadingRelated, setLoadingRelated] = useState(false)
 
   async function playTTS(text: string) {
     if (!('speechSynthesis' in window)) return
@@ -40,6 +42,13 @@ function WordRow({ w }: { w: WordEntry }) {
       } finally {
         setLoadingDict(false)
       }
+    }
+    if (!expanded && relatedWords.length === 0 && !loadingRelated) {
+      setLoadingRelated(true)
+      getRelatedWords(w.id)
+        .then(setRelatedWords)
+        .catch(console.error)
+        .finally(() => setLoadingRelated(false))
     }
   }
 
@@ -83,30 +92,64 @@ function WordRow({ w }: { w: WordEntry }) {
       </div>
 
       {expanded && (
-        <div className="mt-2 rounded-xl bg-black/20 p-4 border border-white/5">
-          {loadingDict ? (
-            <div className="text-xs text-white/50">正在拉取在线词典数据...</div>
-          ) : dictData ? (
-            <div className="space-y-4">
-              {dictData.meanings.slice(0, 2).map((m, i) => (
-                <div key={i}>
-                  <div className="text-xs font-bold text-brand-400/80 mb-1 italic">{m.partOfSpeech}</div>
-                  <ul className="list-inside list-disc space-y-2 text-sm text-white/70">
-                    {m.definitions.slice(0, 2).map((d, j) => (
-                      <li key={j}>
-                        <span>{d.definition}</span>
-                        {d.example && (
-                          <div className="mt-1 text-brand-200/80 italic">"{d.example}"</div>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-xs text-white/50">暂无该词汇的在线语境数据</div>
-          )}
+        <div className="mt-2 grid gap-4 lg:grid-cols-2">
+          <div className="rounded-xl bg-black/20 p-4 border border-white/5">
+            {loadingDict ? (
+              <div className="text-xs text-white/50">正在拉取在线词典数据...</div>
+            ) : dictData ? (
+              <div className="space-y-4">
+                {dictData.meanings.slice(0, 2).map((m, i) => (
+                  <div key={i}>
+                    <div className="text-xs font-bold text-brand-400/80 mb-1 italic">{m.partOfSpeech}</div>
+                    <ul className="list-inside list-disc space-y-2 text-sm text-white/70">
+                      {m.definitions.slice(0, 2).map((d, j) => (
+                        <li key={j}>
+                          <span>{d.definition}</span>
+                          {d.example && (
+                            <div className="mt-1 text-brand-200/80 italic">"{d.example}"</div>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-white/50">暂无该词汇的在线语境数据</div>
+            )}
+          </div>
+
+          <div className="rounded-xl bg-black/20 p-4 border border-white/5">
+            <div className="mb-3 text-xs font-bold text-fuchsia-300/85">相关辨析</div>
+            {loadingRelated ? (
+              <div className="text-xs text-white/50">正在计算易混词...</div>
+            ) : relatedWords.length > 0 ? (
+              <div className="space-y-3">
+                {relatedWords.map((item) => (
+                  <div key={item.id} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">{item.word}</div>
+                        <div className="mt-1 text-xs text-white/60">{item.meaning_zh}</div>
+                      </div>
+                      <div className="rounded-full border border-fuchsia-400/20 bg-fuchsia-400/10 px-3 py-1 text-[11px] text-fuchsia-100">
+                        {item.similarity_score}%
+                      </div>
+                    </div>
+                    <div className="mt-2 text-[11px] text-brand-100/70">{item.reason}</div>
+                    <Link
+                      to={`/contrast/${w.id}/${item.id}`}
+                      className="mt-3 inline-flex rounded-full border border-fuchsia-400/20 bg-fuchsia-400/10 px-3 py-1 text-[11px] text-fuchsia-100 hover:bg-fuchsia-400/20"
+                    >
+                      查看详细辨析
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-white/50">暂时没有找到明显易混的相关词。</div>
+            )}
+          </div>
         </div>
       )}
     </div>

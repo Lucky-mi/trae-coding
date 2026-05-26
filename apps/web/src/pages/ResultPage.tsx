@@ -1,13 +1,17 @@
 import * as echarts from 'echarts'
+import gsap from 'gsap'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import AppShell from '../components/AppShell'
 import { useSession } from '../store/useSession'
-import { getResult } from '../api/client'
-import type { ResultOut } from '../api/client'
+import type { SessionState } from '../store/useSession'
+import { getGuestResult, getResult, getUserAchievements, getUserProgress } from '../api/client'
+import type { ResultOut, UserAchievement, UserProgressSummary } from '../api/client'
+import { useAuth } from '../store/useAuth'
 
 type ResultState = {
   sessionId?: string
+  guestId?: string
   setup?: {
     stage: string
     perLevelCount: number
@@ -26,19 +30,34 @@ type ResultState = {
 export default function ResultPage() {
   const location = useLocation()
   const state = location.state as ResultState | null
-  const addRecord = useSession((s) => s.addRecord)
+  const addRecord = useSession((s: SessionState) => s.addRecord)
+  const { user } = useAuth()
 
   const [remoteData, setRemoteData] = useState<ResultOut | null>(null)
+  const [progress, setProgress] = useState<UserProgressSummary | null>(null)
+  const [nextAchievement, setNextAchievement] = useState<UserAchievement | null>(null)
 
   useEffect(() => {
     if (state?.sessionId) {
-      getResult(state.sessionId).then((res) => {
+      const task = state.guestId
+        ? getGuestResult(state.sessionId, state.guestId)
+        : getResult(state.sessionId)
+      task.then((res) => {
         setRemoteData(res)
       }).catch(err => {
         console.error(err)
       })
     }
-  }, [state?.sessionId])
+  }, [state?.sessionId, state?.guestId])
+
+  useEffect(() => {
+    if (!user) return
+    getUserProgress().then(setProgress).catch(() => {})
+    getUserAchievements().then((items) => {
+      const next = items.find((item) => !item.unlocked)
+      setNextAchievement(next || null)
+    }).catch(() => {})
+  }, [user])
 
   const data = useMemo<ResultState>(() => {
     if (remoteData) {
@@ -79,7 +98,7 @@ export default function ResultPage() {
   const accuracy = data.completed > 0 ? data.correct / data.completed : 0
   const levelScores = data.byLevel.map((x) => ({
     name: x.level,
-    value: x.total > 0 ? Math.round((x.correct / x.total) * 100) : 0,
+    value: x.total > 0 ? Math.round((x.correct / x.total) * 100) : Math.round(accuracy * 100),
   }))
 
   const analysisText = data.cefrDesc || '系统未能收集到足够的答题数据。'
@@ -97,6 +116,13 @@ export default function ResultPage() {
   useEffect(() => {
     const el = radarRef.current
     if (!el) return
+    
+    // Add simple entrance animation to radar container
+    gsap.fromTo(el,
+      { opacity: 0, scale: 0.9, y: 20 },
+      { opacity: 1, scale: 1, y: 0, duration: 0.6, ease: 'back.out(1.2)', delay: 0.2 }
+    )
+
     const chart = echarts.init(el)
     const indicator = levelScores.map((x) => ({ name: x.name, max: 100 }))
     chart.setOption({
@@ -127,15 +153,41 @@ export default function ResultPage() {
     })
     const onResize = () => chart.resize()
     window.addEventListener('resize', onResize)
+
     return () => {
       window.removeEventListener('resize', onResize)
       chart.dispose()
     }
   }, [levelScores])
 
+  const numberRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (remoteData?.vocab_score !== undefined && numberRef.current) {
+      const obj = { val: 0 }
+      gsap.to(obj, {
+        val: remoteData.vocab_score,
+        duration: 2.0,
+        ease: "power2.out",
+        onUpdate: () => {
+          if (numberRef.current) {
+            numberRef.current.innerHTML = Math.round(obj.val).toString()
+          }
+        }
+      })
+    }
+  }, [remoteData])
+
   useEffect(() => {
     const el = barRef.current
     if (!el) return
+    
+    // Add simple entrance animation to bar container
+    gsap.fromTo(el,
+      { opacity: 0, x: 20 },
+      { opacity: 1, x: 0, duration: 0.6, ease: 'power2.out', delay: 0.3 }
+    )
+
     const chart = echarts.init(el)
     chart.setOption({
       backgroundColor: 'transparent',
@@ -192,15 +244,17 @@ export default function ResultPage() {
             </div>
             {remoteData?.vocab_score !== undefined && (
               <div className="ml-4 flex gap-3">
-                <div className="rounded-2xl border border-brand-500/20 bg-brand-500/10 px-6 py-4 text-center shadow-glow">
-                  <div className="text-xs font-semibold text-brand-300">预估词汇量</div>
-                  <div className="mt-1 text-3xl font-bold text-white tracking-tight">
-                    {remoteData.vocab_score}
+                <div className="rounded-2xl border border-brand-500/20 bg-brand-500/10 px-6 py-4 text-center shadow-glow relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-gradient-to-tr from-brand-500/0 via-brand-400/5 to-white/10 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+                  <div className="text-xs font-semibold text-brand-300 relative z-10">预估词汇量</div>
+                  <div ref={numberRef} className="mt-1 text-3xl font-bold text-white tracking-tight relative z-10">
+                    0
                   </div>
                 </div>
-                <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 px-6 py-4 text-center shadow-glow">
-                  <div className="text-xs font-semibold text-purple-300">CEFR 等级</div>
-                  <div className="mt-2 text-xl font-bold text-white tracking-tight">
+                <div className="rounded-2xl border border-purple-500/20 bg-purple-500/10 px-6 py-4 text-center shadow-glow relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/0 via-purple-400/5 to-white/10 opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+                  <div className="text-xs font-semibold text-purple-300 relative z-10">CEFR 等级</div>
+                  <div className="mt-2 text-xl font-bold text-white tracking-tight relative z-10">
                     {data.cefrLevel}
                   </div>
                 </div>
@@ -236,6 +290,56 @@ export default function ResultPage() {
             </div>
           </div>
         </div>
+
+        {progress?.latest_achievements?.length ? (
+          <div className="mb-6 rounded-[2rem] border border-emerald-400/20 bg-emerald-400/10 p-6 shadow-glow backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-emerald-200">最近解锁成就</div>
+                <div className="mt-1 text-xs text-white/70">
+                  当前连续学习 {progress.streak_days} 天，累计点亮 {progress.achievement_count} 枚成就。
+                </div>
+              </div>
+              <Link to="/achievements" className="text-xs text-emerald-100/80 hover:text-white">
+                查看全部成就
+              </Link>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-3">
+              {progress.latest_achievements.slice(0, 4).map((item) => (
+                <div key={`${item.code}-${item.unlocked_at}`} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/85">
+                  {item.title}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {nextAchievement ? (
+          <div className="mb-6 rounded-[2rem] border border-fuchsia-400/20 bg-fuchsia-400/10 p-6 shadow-glow backdrop-blur">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-semibold text-fuchsia-100">下一目标推荐</div>
+                <div className="mt-2 text-lg font-semibold text-white">{nextAchievement.title}</div>
+                <div className="mt-1 text-sm text-white/70">{nextAchievement.description}</div>
+              </div>
+              <Link to="/achievements" className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-white/80 hover:bg-white/10">
+                去成就馆查看
+              </Link>
+            </div>
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between text-[11px] text-white/45">
+                <span>当前进度</span>
+                <span>{nextAchievement.progress_label}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-brand-400 to-fuchsia-400"
+                  style={{ width: `${Math.max(4, Math.round((nextAchievement.progress_current / nextAchievement.progress_target) * 100))}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="grid gap-6 md:grid-cols-2">
           <div className="rounded-[2rem] border border-white/10 bg-panel-900 p-6 shadow-glow backdrop-blur">

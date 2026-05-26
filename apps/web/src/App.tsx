@@ -8,6 +8,10 @@ import HistoryPage from './pages/HistoryPage'
 import LeaderboardPage from './pages/LeaderboardPage'
 import DictionaryPage from './pages/DictionaryPage'
 import ReviewPage from './pages/ReviewPage'
+import AdminPage from './pages/AdminPage'
+import AchievementsPage from './pages/AchievementsPage'
+import ContrastPage from './pages/ContrastPage'
+import GardenPage from './pages/GardenPage'
 import { ProtectedRoute } from './components/ProtectedRoute'
 
 function App() {
@@ -16,14 +20,17 @@ function App() {
       <Route path="/" element={<HomePage />} />
       <Route path="/auth" element={<AuthPage />} />
       <Route path="/leaderboard" element={<LeaderboardPage />} />
-      
-      {/* 受保护路由 */}
-      <Route path="/setup" element={<ProtectedRoute><SetupPage /></ProtectedRoute>} />
-      <Route path="/quiz" element={<ProtectedRoute><QuizPage /></ProtectedRoute>} />
-      <Route path="/result" element={<ProtectedRoute><ResultPage /></ProtectedRoute>} />
+
+      <Route path="/setup" element={<SetupPage />} />
+      <Route path="/quiz" element={<QuizPage />} />
+      <Route path="/result" element={<ResultPage />} />
       <Route path="/history" element={<ProtectedRoute><HistoryPage /></ProtectedRoute>} />
+      <Route path="/achievements" element={<ProtectedRoute><AchievementsPage /></ProtectedRoute>} />
+      <Route path="/garden" element={<ProtectedRoute><GardenPage /></ProtectedRoute>} />
+      <Route path="/contrast/:wordId/:otherId" element={<ProtectedRoute><ContrastPage /></ProtectedRoute>} />
       <Route path="/dictionary" element={<ProtectedRoute><DictionaryPage /></ProtectedRoute>} />
       <Route path="/review" element={<ProtectedRoute><ReviewPage /></ProtectedRoute>} />
+      <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
       
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

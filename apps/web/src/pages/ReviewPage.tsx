@@ -4,6 +4,15 @@ import gsap from 'gsap'
 import { getTodayReview, submitReview } from '../api/client'
 import type { SrsReviewTask } from '../api/client'
 import AppShell from '../components/AppShell'
+import AchievementPopup from '../components/AchievementPopup'
+import EvolutionModal from '../components/EvolutionModal'
+import GardenCollectionPopup from '../components/GardenCollectionPopup'
+import { getPlantStageInfo } from '../components/ExpPlant'
+
+import { useAuth } from '../store/useAuth'
+import { getUserExp } from '../api/client'
+import { getPlantCycleExp, PLANT_MILESTONE_EXP, useSession } from '../store/useSession'
+import type { GardenPlant, SessionState } from '../store/useSession'
 
 export default function ReviewPage() {
   const navigate = useNavigate()
@@ -11,10 +20,16 @@ export default function ReviewPage() {
   const [currentIndex, setCurrentIndex] = useState(0)
   const [loading, setLoading] = useState(true)
   const [answering, setAnswering] = useState(false)
-  const [lastBoxLevel, setLastBoxLevel] = useState<number | null>(null)
   const [lastCorrect, setLastCorrect] = useState<boolean | null>(null)
+  const [lastBoxLevel, setLastBoxLevel] = useState<number | null>(null)
+  const [earnedExp, setEarnedExp] = useState(0)
 
   const cardRef = useRef<HTMLDivElement>(null)
+  const { setUserProgress, user } = useAuth()
+  const collectMaturePlants = useSession((s: SessionState) => s.collectMaturePlants)
+  const [rewardToast, setRewardToast] = useState<{ exp: number; achievements: string[] } | null>(null)
+  const [evolution, setEvolution] = useState<{ prevExp: number; nextExp: number } | null>(null)
+  const [gardenReward, setGardenReward] = useState<GardenPlant[] | null>(null)
 
   useEffect(() => {
     getTodayReview()
@@ -58,8 +73,37 @@ export default function ReviewPage() {
     setLastCorrect(isCorrect)
 
     try {
-      const res = await submitReview(currentTask.srs_id, isCorrect)
+      const res = await submitReview(currentTask.srs_id, currentTask.question.id, optionIndex)
       setLastBoxLevel(res.box_level)
+      const beforeExp = user?.exp || 0
+      const afterExp = res.current_exp ?? beforeExp
+      const beforeCycleExp = getPlantCycleExp(beforeExp)
+      const afterCycleExp = getPlantCycleExp(afterExp)
+      const crossedMilestone = Math.floor(afterExp / PLANT_MILESTONE_EXP) > Math.floor(beforeExp / PLANT_MILESTONE_EXP)
+      if (!crossedMilestone && getPlantStageInfo(afterCycleExp).level > getPlantStageInfo(beforeCycleExp).level) {
+        setEvolution({ prevExp: beforeCycleExp, nextExp: afterCycleExp })
+        window.setTimeout(() => setEvolution(null), 2400)
+      }
+      const collectedPlants = collectMaturePlants(afterExp)
+      if (collectedPlants.length > 0) {
+        setGardenReward(collectedPlants)
+        window.setTimeout(() => setGardenReward(null), 3200)
+      }
+      if (res.added_exp !== undefined) {
+        setEarnedExp(prev => prev + (res.added_exp as number))
+      }
+      if ((res.added_exp || 0) > 0 || (res.new_achievements?.length || 0) > 0) {
+        setRewardToast({
+          exp: res.added_exp || 0,
+          achievements: (res.new_achievements || []).map((item) => item.title),
+        })
+        window.setTimeout(() => setRewardToast(null), 2200)
+      }
+      setUserProgress({
+        exp: res.current_exp ?? user?.exp,
+        streak_days: res.streak_days ?? user?.streak_days,
+        achievement_count: user?.achievement_count ? user.achievement_count + (res.new_achievements?.length || 0) : undefined,
+      })
 
       // 简单答题反馈特效
       if (isCorrect) {
@@ -68,10 +112,17 @@ export default function ReviewPage() {
         gsap.to(cardRef.current, { x: 10, duration: 0.05, yoyo: true, repeat: 5, ease: 'power1.inOut' })
       }
 
-      setTimeout(() => {
+      setTimeout(async () => {
         setAnswering(false)
         setLastCorrect(null)
         setCurrentIndex((prev) => prev + 1)
+        
+        if (currentIndex + 1 >= tasks.length) {
+          try {
+            const expData = await getUserExp()
+            setUserProgress({ exp: expData.exp })
+          } catch(e) {}
+        }
       }, 800)
     } catch (err) {
       console.error(err)
@@ -99,9 +150,15 @@ export default function ReviewPage() {
             </svg>
           </div>
           <h2 className="text-3xl font-bold text-white mb-4">今日复习任务已完成！</h2>
-          <p className="text-white/60 mb-8">
-            你一共复习了 {tasks.length} 个单词，遗忘曲线正在被你一步步战胜。明天记得再来！
+          <p className="text-white/60 mb-2">
+            你一共复习了 {tasks.length} 个单词，遗忘曲线正在被你一步步战胜。
           </p>
+          {earnedExp > 0 && (
+            <p className="text-brand-300 font-semibold mb-8">
+              本次复习共获得 +{earnedExp} 经验值！
+            </p>
+          )}
+          {!earnedExp && <p className="text-white/60 mb-8">明天记得再来！</p>}
           <button
             onClick={() => navigate('/dictionary')}
             className="rounded-full bg-gradient-to-r from-brand-500 to-fuchsia-500 px-8 py-3 font-semibold text-white shadow-glow transition hover:brightness-110"
@@ -118,6 +175,9 @@ export default function ReviewPage() {
   return (
     <AppShell>
       <div className="mx-auto max-w-2xl pt-6">
+        {evolution ? <EvolutionModal prevExp={evolution.prevExp} nextExp={evolution.nextExp} /> : null}
+        {gardenReward ? <GardenCollectionPopup plants={gardenReward} /> : null}
+        {rewardToast ? <AchievementPopup exp={rewardToast.exp} achievements={rewardToast.achievements} /> : null}
         <div className="mb-6 flex items-center justify-between">
           <div className="text-sm font-medium text-white/50">
             艾宾浩斯复习进度
