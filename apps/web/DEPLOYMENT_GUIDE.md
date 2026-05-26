@@ -49,15 +49,21 @@
 5. 点击 **Create Web Service**。部署成功后，你会得到一个后端的公网地址（例如 `https://wordgauge-api.onrender.com`）。
 
 ### 步骤 3：前后端联调
-1. 回到**前端代码**，将 `apps/web/src/api/client.ts` 里的 `API_BASE` 改为你在 Render 拿到的公网地址：
-   ```typescript
-   const API_BASE = import.meta.env.VITE_API_BASE || 'https://wordgauge-api.onrender.com'
+1. 在**前端部署平台**（Netlify/Vercel）的环境变量中添加：
+   ```bash
+   VITE_API_BASE=https://wordgauge-api.onrender.com
    ```
-2. 回到**后端代码**，在 `src/main.js` 中将你的 Vercel 域名加入 CORS 白名单：
-   ```javascript
-   app.use(cors({ origin: ['https://wordgauge.vercel.app', 'http://localhost:5173'], credentials: true }))
+2. 在**后端部署平台**（Render）的环境变量中添加：
+   ```bash
+   CORS_ORIGINS=https://lucky-puppy5808e4.netlify.app
    ```
-3. 把这些改动提交 (git push) 到 GitHub，Vercel 和 Render 都会**自动触发重新部署**。
+   如果你还要兼容本地开发，可以写成：
+   ```bash
+   CORS_ORIGINS=https://lucky-puppy5808e4.netlify.app,http://localhost:5173,http://localhost:5174,http://localhost:5175
+   ```
+3. 前端登录地址示例：
+   [https://lucky-puppy5808e4.netlify.app/auth](https://lucky-puppy5808e4.netlify.app/auth)
+4. 把这些改动提交 (git push) 到 GitHub，Netlify 和 Render 都会**自动触发重新部署**。
 
 大功告成！现在你可以把 Vercel 的域名发给任何朋友，他们在手机或电脑上都能随时注册测单词了。
 

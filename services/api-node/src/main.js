@@ -13,7 +13,26 @@ import { evaluateAchievements, getUserAchievements, getUserProgressSummary, touc
 const app = express()
 app.use(requestLogger)
 app.use(express.json({ limit: '1mb' }))
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'], credentials: true }))
+
+const allowedOrigins = (
+  process.env.CORS_ORIGINS
+    ? process.env.CORS_ORIGINS.split(',').map((item) => item.trim()).filter(Boolean)
+    : [
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://localhost:5175',
+        'https://lucky-puppy5808e4.netlify.app',
+      ]
+)
+
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin) return callback(null, true)
+    if (allowedOrigins.includes(origin)) return callback(null, true)
+    return callback(new Error(`CORS blocked for origin: ${origin}`))
+  },
+  credentials: true,
+}))
 
 const projectRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../..')
 const dbPath = path.join(projectRoot, 'data.db')

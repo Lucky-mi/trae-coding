@@ -175,7 +175,7 @@ export default function SetupPage() {
                 开始
               </button>
               <div className="text-xs text-white/50">
-                题库来自本地 API（默认 http://localhost:8000），请确保已启动服务
+                题库接口由 `VITE_API_BASE` 决定；本地开发默认是 http://localhost:8000
               </div>
             </div>
           </div>

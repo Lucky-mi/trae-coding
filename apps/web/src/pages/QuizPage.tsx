@@ -290,7 +290,7 @@ export default function QuizPage() {
             <div className="text-sm font-semibold text-white/85">题库服务不可用</div>
             <div className="mt-2 break-words text-xs text-white/55">{error}</div>
             <div className="mt-6 text-xs text-white/55">
-              确认本地 API 已启动：http://localhost:8000/health
+              检查 `VITE_API_BASE` 是否指向正确后端；本地开发健康检查地址通常是 http://localhost:8000/health
             </div>
           </div>
         </div>
